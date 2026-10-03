@@ -45,6 +45,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1107,15 +1108,19 @@ func cloneHeaders(h http.Header) map[string][]string {
 // WEB MONITOR SERVER (existing code - keeping it the same)
 // ============================================================================
 
-func StartMonitorServer(port int) {
+func StartMonitorServer(host string, port int) {
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/api/entries", handleAPIEntries)
 	http.HandleFunc("/api/entry/", handleAPIEntry)
 	http.HandleFunc("/api/clear", handleAPIClear)
 	http.HandleFunc("/api/stats", handleAPIStats)
 
-	addr := fmt.Sprintf(":%d", port)
-	log.Printf("[MONITOR] Starting monitor server on http://localhost%s", addr)
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	displayHost := host
+	if displayHost == "" {
+		displayHost = "localhost"
+	}
+	log.Printf("[MONITOR] Starting monitor server on http://%s", net.JoinHostPort(displayHost, strconv.Itoa(port)))
 
 	go func() {
 		if err := http.ListenAndServe(addr, nil); err != nil {
@@ -2196,11 +2201,13 @@ func (m *OAuthModule) ProcessResponse(resp *http.Response) error {
 
 func main() {
 	port := flag.Int("port", 8080, "Proxy port")
+	listenHost := flag.String("listen-host", "", "Proxy listen host (empty means all interfaces)")
 	cleanup := flag.Bool("cleanup", false, "Remove CA certificates and exit")
 	certDir := flag.String("certdir", ".", "Certificate directory")
 	skipInstall := flag.Bool("skip-install", false, "Skip automatic certificate installation")
 	configFile := flag.String("config", "proxy-config.ini", "Configuration file path")
 	monitorPort := flag.Int("monitor-port", 4040, "Monitor web interface port")
+	monitorHost := flag.String("monitor-host", "", "Monitor listen host (empty means all interfaces)")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging (log all traffic to console)")
 	flag.Parse()
 
@@ -2233,9 +2240,9 @@ func main() {
 
 	initializeModules()
 
-	StartMonitorServer(*monitorPort)
+	StartMonitorServer(*monitorHost, *monitorPort)
 
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", config.Port))
+	listener, err := net.Listen("tcp", net.JoinHostPort(*listenHost, strconv.Itoa(config.Port)))
 	if err != nil {
 		log.Fatalf("Failed to start proxy: %v", err)
 	}

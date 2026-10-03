@@ -28,6 +28,15 @@ go build tlsproxy.go
 
 The proxy listens on `localhost:8080` by default.
 
+## Desktop GUI
+
+The [`gui`](gui/) folder contains a Windows, Linux, and macOS Wails desktop
+application with a Fiddler Classic-style session list and inspectors. It can
+start and stop TLSDebug, install the generated Root CA, filter captured
+traffic, and save or import sessions for offline review.
+
+See [`gui/README.md`](gui/README.md) for prerequisites and launch commands.
+
 ## Certificate Installation
 
 The proxy generates `proxy-ca.crt` and `proxy-ca.key` only when a pair is not
@@ -163,6 +172,11 @@ requests.get('https://api.example.com', proxies=proxies, verify='proxy-ca.crt')
 
 ```
 -port int          Proxy port (default 8080)
+-listen-host string
+                   Proxy listen host (default all interfaces)
+-monitor-port int  Monitor web interface port (default 4040)
+-monitor-host string
+                   Monitor listen host (default all interfaces)
 -certdir string    Certificate directory (default ".")
 -config string     Configuration file (default "proxy-config.ini")
 -cleanup          Remove CA certificates and exit
