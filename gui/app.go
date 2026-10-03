@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -165,6 +167,11 @@ func (a *App) StartProxy() (AppState, error) {
 	if err := os.MkdirAll(settings.DataDir, 0700); err != nil {
 		return AppState{}, fmt.Errorf("create data directory: %w", err)
 	}
+	if root, copied, err := syncRootCA(settings.DataDir); err != nil {
+		return AppState{}, err
+	} else if copied && a.ctx != nil {
+		wailsruntime.EventsEmit(a.ctx, "proxy:log", "Using Root CA from "+root)
+	}
 
 	args := []string{
 		"-port", strconv.Itoa(settings.ProxyPort),
@@ -300,8 +307,7 @@ func (a *App) SaveSessions(entries []TrafficEntry) (string, error) {
 		Title:           "Save TLSDebug Sessions",
 		DefaultFilename: defaultName,
 		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "TLSDebug Sessions", Pattern: "*.tlsdebug.json"},
-			{DisplayName: "JSON", Pattern: "*.json"},
+			{DisplayName: "TLSDebug Sessions", Pattern: "*.json"},
 		},
 	})
 	if err != nil || path == "" {
@@ -326,7 +332,7 @@ func (a *App) ImportSessions() ([]TrafficEntry, error) {
 	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "Import TLSDebug Sessions",
 		Filters: []wailsruntime.FileFilter{
-			{DisplayName: "TLSDebug Sessions", Pattern: "*.tlsdebug.json;*.json"},
+			{DisplayName: "TLSDebug Sessions", Pattern: "*.json"},
 		},
 	})
 	if err != nil || path == "" {
@@ -482,6 +488,120 @@ func (a *App) resolveProxyBinary(settings Settings) (string, error) {
 		return path, nil
 	}
 	return "", errors.New("TLSDebug proxy binary not found; set its path in Settings or use a build script")
+}
+
+func syncRootCA(dataDir string) (string, bool, error) {
+	for _, root := range rootCandidates() {
+		copied, err := copyRootCA(root, dataDir)
+		if err != nil {
+			return "", false, err
+		}
+		if copied {
+			return root, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func rootCandidates() []string {
+	var starts []string
+	if configured := strings.TrimSpace(os.Getenv("TLSDEBUG_ROOT")); configured != "" {
+		starts = append(starts, configured)
+	}
+	if workingDir, err := os.Getwd(); err == nil {
+		starts = append(starts, workingDir)
+	}
+	if executable, err := os.Executable(); err == nil {
+		starts = append(starts, filepath.Dir(executable))
+	}
+
+	seen := make(map[string]bool)
+	var candidates []string
+	for _, start := range starts {
+		current, err := filepath.Abs(start)
+		if err != nil {
+			continue
+		}
+		for depth := 0; depth < 10; depth++ {
+			if !seen[current] {
+				seen[current] = true
+				candidates = append(candidates, current)
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				break
+			}
+			current = parent
+		}
+	}
+	return candidates
+}
+
+func copyRootCA(root, dataDir string) (bool, error) {
+	sourceCert := filepath.Join(root, "proxy-ca.crt")
+	sourceKey := filepath.Join(root, "proxy-ca.key")
+	certInfo, certErr := os.Stat(sourceCert)
+	keyInfo, keyErr := os.Stat(sourceKey)
+	if errors.Is(certErr, os.ErrNotExist) && errors.Is(keyErr, os.ErrNotExist) {
+		return false, nil
+	}
+	if certErr != nil || keyErr != nil || certInfo.IsDir() || keyInfo.IsDir() {
+		return false, fmt.Errorf("TLSDebug root CA requires both %s and %s", sourceCert, sourceKey)
+	}
+
+	certPEM, err := os.ReadFile(sourceCert)
+	if err != nil {
+		return false, fmt.Errorf("read root CA certificate: %w", err)
+	}
+	keyPEM, err := os.ReadFile(sourceKey)
+	if err != nil {
+		return false, fmt.Errorf("read root CA key: %w", err)
+	}
+	if _, err := tls.X509KeyPair(certPEM, keyPEM); err != nil {
+		return false, fmt.Errorf("invalid TLSDebug root CA pair in %s: %w", root, err)
+	}
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		return false, fmt.Errorf("create CA data directory: %w", err)
+	}
+
+	destinationCert := filepath.Join(dataDir, "proxy-ca.crt")
+	destinationKey := filepath.Join(dataDir, "proxy-ca.key")
+	if sameFileContents(destinationCert, certPEM) && sameFileContents(destinationKey, keyPEM) {
+		return true, nil
+	}
+	if err := writeFileAtomic(destinationCert, certPEM, 0644); err != nil {
+		return false, fmt.Errorf("copy root CA certificate: %w", err)
+	}
+	if err := writeFileAtomic(destinationKey, keyPEM, 0600); err != nil {
+		return false, fmt.Errorf("copy root CA key: %w", err)
+	}
+	return true, nil
+}
+
+func sameFileContents(path string, expected []byte) bool {
+	actual, err := os.ReadFile(path)
+	return err == nil && bytes.Equal(actual, expected)
+}
+
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), ".tlsdebug-ca-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if err := temp.Chmod(mode); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, path)
 }
 
 func (a *App) streamOutput(reader io.Reader) {

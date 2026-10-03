@@ -14,5 +14,6 @@ fi
 go build -o "$GUI_DIR/bin/$PROXY_NAME" "$REPO_DIR/tlsproxy.go"
 
 cd "$GUI_DIR"
-TLSDEBUG_PROXY_BIN="$GUI_DIR/bin/$PROXY_NAME" \
+TLSDEBUG_ROOT="$REPO_DIR" \
+  TLSDEBUG_PROXY_BIN="$GUI_DIR/bin/$PROXY_NAME" \
   go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 dev
