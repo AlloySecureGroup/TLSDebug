@@ -71,8 +71,8 @@ macOS).
 
 ## First capture
 
-1. Click **Start**. This starts the proxy and generates a per-user CA pair in
-   the data directory.
+1. Click **Start**. This starts the proxy, using the repository CA pair when
+   available or generating a per-user pair in the data directory.
 2. Click **Install Root CA** and approve the operating-system prompt.
 3. Configure the client being inspected to use `127.0.0.1:8080` as its HTTP
    and HTTPS proxy.
@@ -81,3 +81,9 @@ macOS).
 The CA private key grants the ability to issue certificates trusted by that
 machine. The GUI stores it in the configured data directory. Do not share it,
 and use TLSDebug only with systems and traffic you are authorized to inspect.
+
+If the TLSDebug repository root contains both `proxy-ca.crt` and
+`proxy-ca.key`, the GUI validates that pair and copies it into the configured
+data directory before starting the proxy. The repository pair takes precedence
+over a previously generated GUI CA. Set `TLSDEBUG_ROOT` when launching from a
+nonstandard working directory.

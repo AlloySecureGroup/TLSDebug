@@ -4,3 +4,4 @@ proxy-ca.key
 proxy.log
 EditThisCookie_Sessions.json
 tlsproxy-mac-arm
+gui/build/darwin/Info.dev.plist
